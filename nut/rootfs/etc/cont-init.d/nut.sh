@@ -5,6 +5,7 @@
 # ==============================================================================
 readonly USERS_CONF=/etc/nut/upsd.users
 readonly UPSD_CONF=/etc/nut/upsd.conf
+readonly UPS_CONF=/etc/nut/ups.conf
 declare nutmode
 declare password
 declare shutdowncmd
@@ -76,6 +77,19 @@ if bashio::config.equals 'mode' 'netserver' ;then
         echo "MAXAGE ${maxage}" >> "${UPSD_CONF}"
     fi
 
+    debug_min=0
+    if bashio::trace; then
+        debug_min=9
+        export LIBUSB_DEBUG=4
+    elif bashio::debug; then
+        debug_min=4
+        export LIBUSB_DEBUG=3
+    # bashio only has functions for checking the `debug` and `trace` log levels.
+    #elif bashio::info; then
+    elif [[ "${__BASHIO_LOG_LEVEL}" -ge "${__BASHIO_LOG_LEVEL_INFO}" ]]; then
+        debug_min=1
+    fi
+
     for device in $(bashio::config "devices|keys"); do
         upsname=$(bashio::config "devices[${device}].name")
         upsdriver=$(bashio::config "devices[${device}].driver")
@@ -94,24 +108,21 @@ if bashio::config.equals 'mode' 'netserver' ;then
             echo "  port = ${upsport}"
         } >> /etc/nut/ups.conf
 
+        debug_min_set='n'
         OIFS=$IFS
         IFS=$'\n'
         for configitem in $(bashio::config "devices[${device}].config"); do
             echo "  ${configitem}" >> /etc/nut/ups.conf
+            [[ "${configitem}" =~ ^debug_min\ *= ]] && debug_min_set='y'
         done
         IFS="$OIFS"
+        if [ "${debug_min_set}" = 'n' ] && [ "${debug_min}" -ge 1 ]; then
+            echo "  debug_min = ${debug_min}" >> "${UPS_CONF}"
+        fi
 
         echo "MONITOR ${upsname}@localhost ${upspowervalue} upsmonmaster ${upsmonpwd} master" \
             >> /etc/nut/upsmon.conf
     done
-
-    bashio::log.info "Starting the UPS drivers..."
-    # Run upsdrvctl
-    if bashio::debug; then
-        upsdrvctl -u root -D start
-    else
-        upsdrvctl -u root start
-    fi
 fi
 
 shutdowncmd="/run/s6/basedir/bin/halt"
